@@ -1,3 +1,5 @@
+import axios from 'axios';
+
 const WIDTH = 1200;
 const HEIGHT = 800;
 
@@ -156,12 +158,15 @@ const sampleOfficers = [
 ];
 
 async function loadData() {
+  function httpGet(theUrl)
+  const res = await axios.get(`some-url/todos`);
+  console.log(res)
   return {
     data: {
-      incidents: sampleIncidents,
-      officers: sampleOfficers,
+      incidents: res.data.incidents,
+      officers: res.data.officers,
     },
-    error: null,
+    error: res.error,
   };
 }
 
