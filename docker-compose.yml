@@ -37,3 +37,12 @@ services:
       - "dispatching_queue"
     links:
       - "dispatching_queue"
+
+  # backend:
+  #   build: ./backend
+  #   ports:
+  #   - "8080:8080"
+  #   container_name: "backend"
+  #   restart: on-failure
+  #   depends_on:
+  #     - "event_publisher"

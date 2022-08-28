@@ -1,4 +1,3 @@
-import axios from 'axios';
 
 const WIDTH = 1200;
 const HEIGHT = 800;
@@ -92,15 +91,17 @@ function drawAssignLines(incidents, officers) {
   graphics.lineStyle(2, 0x37b218, 1);
 
   incidents.forEach((incident) => {
-    const officer = officers.find((o) => o.id === incident.officerId);
-    graphics.moveTo(
-      incident.loc.x * UNIT_WIDTH,
-      incident.loc.y * UNIT_HEIGHT
-    );
-    graphics.lineTo(
-      officer.loc.x,
-      officer.loc.y
-    );
+    if (incident.officerId !== 0) {
+      const officer = officers.find((o) => o.id === incident.officerId);
+      graphics.moveTo(
+        incident.loc.x * UNIT_WIDTH,
+        incident.loc.y * UNIT_HEIGHT
+      );
+      graphics.lineTo(
+        officer.loc.x,
+        officer.loc.y
+      );
+    }
   });
 
   app.stage.addChild(graphics);
@@ -124,7 +125,7 @@ function start() {
   });
 
   loop();
-  setInterval(loop, 5000);
+  setInterval(loop, 1000);
 }
 
 async function loop() {
@@ -158,9 +159,15 @@ const sampleOfficers = [
 ];
 
 async function loadData() {
-  function httpGet(theUrl)
-  const res = await axios.get(`some-url/todos`);
-  console.log(res)
+  let res;
+  let xhr = new XMLHttpRequest();
+  xhr.open('GET', 'http://localhost:8080/api/v1/state', false);
+  xhr.onload = function() {
+      let data = JSON.parse(this.responseText);
+      console.log(data);
+      res = data
+  };
+  xhr.send();
   return {
     data: {
       incidents: res.data.incidents,
