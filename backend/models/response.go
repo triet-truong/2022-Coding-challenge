@@ -20,7 +20,7 @@ type Data struct {
 }
 type Incident struct {
 	Id        int      `json:"id"`
-	OfficerId int      `json:"officer_id"`
+	OfficerId int      `json:"officerId"`
 	CodeName  string   `json:"codename"`
 	Loc       Location `json:"loc"`
 }
@@ -28,9 +28,8 @@ type Incident struct {
 type Officer struct {
 	Id         int      `json:"id"`
 	BadgeName  string   `json:"badgeName"`
+	IncidentId int      `json:"-"`
 	Loc        Location `json:"loc"`
-	IsBusy     bool     `json:"IsBusy"`
-	IncidentId int      `json:"IncidentId"`
 }
 
 type Location struct {

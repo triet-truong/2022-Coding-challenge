@@ -3,9 +3,9 @@ package handlers
 import (
 	"backend-axon-challenge-2022/models"
 	"encoding/json"
+	"fmt"
 	"log"
 	"math"
-	"time"
 
 	"github.com/streadway/amqp"
 )
@@ -37,7 +37,7 @@ func ReadEvents() {
 	msgs, err := ch.Consume(
 		q.Name, // queue
 		"",     // consumer
-		true,   // auto-ack
+		false,  // auto-ack
 		false,  // exclusive
 		false,  // no-local
 		false,  // no-wait
@@ -45,8 +45,6 @@ func ReadEvents() {
 	)
 	failOnError(err, "Failed to register a consumer")
 
-	go pickTask()
-	go consumeMessage()
 	go func(taskQueue models.TaskQueue) {
 		for d := range msgs {
 			var m *models.Message
@@ -60,6 +58,7 @@ func ReadEvents() {
 			messageQueue <- *m
 		}
 	}(taskQueue)
+	go consumeMessage()
 
 	log.Printf(" [*] Waiting for messages. To exit press CTRL+C")
 
@@ -67,7 +66,7 @@ func ReadEvents() {
 
 func consumeMessage() {
 	for m := range messageQueue {
-		time.Sleep(1000 * time.Millisecond)
+		// time.Sleep(1000 * time.Millisecond)
 
 		// log.Printf("MapOfficerById %v\n", MapOfficerById)
 		// log.Printf("MapIncidentById %v\n", MapIncidentById)
@@ -100,32 +99,37 @@ func consumeMessage() {
 	}
 }
 
-func pickTask() {
-	for _, task := range MapIncidentById.Values() {
-		handleIncidentOccurred(task)
-		time.Sleep(100 * time.Millisecond)
-	}
-}
-
 func handleIncidentOccurred(incident models.Incident) {
-	if chosenOfficer := findNearestOfficer(incident); chosenOfficer != nil {
+	if chosenOfficer := findNearestAvailableOfficer(incident); chosenOfficer != nil {
+		fmt.Println(chosenOfficer)
 		incident.OfficerId = chosenOfficer.Id
-		chosenOfficer.IsBusy = true
+
+		chosenOfficer.IncidentId = incident.Id
 		MapOfficerById.Set(chosenOfficer.Id, *chosenOfficer)
 	}
 	MapIncidentById.Set(incident.Id, incident)
-
 }
 
 func handleIncidentResolved(in models.Incident) {
 	incident := MapIncidentById.Get(in.Id)
 	if incident.Id != 0 && incident.OfficerId != 0 {
 		officer := MapOfficerById.Get(incident.OfficerId)
-		officer.IsBusy = false
-		MapOfficerById.Set(incident.OfficerId, officer)
+		if officer.Id == 0 {
+			return
+		}
 
-		MapIncidentById.Delete(incident.Id)
+		if nextIncident := findNearestUnassignedIncident(officer); nextIncident != nil {
+			nextIncident.OfficerId = officer.Id
+			MapIncidentById.Set(nextIncident.Id, *nextIncident)
+
+			officer.IncidentId = nextIncident.Id
+			MapOfficerById.Set(officer.Id, officer)
+		} else {
+			MapOfficerById.Set(incident.OfficerId, officer)
+		}
 	}
+	MapIncidentById.Delete(incident.Id)
+
 }
 
 func handleOfficerGoesOnline(officer models.Officer) {
@@ -134,26 +138,44 @@ func handleOfficerGoesOnline(officer models.Officer) {
 
 func handleOfficerGoesOffline(officerId int) {
 	officer := MapOfficerById.Get(officerId)
+	if officer.Id == 0 {
+		return
+	}
 	incidentId := officer.IncidentId
 	MapOfficerById.Delete(officerId)
 
 	if incidentId != 0 {
 		assignedIncident := MapIncidentById.Get(incidentId)
-		taskQueue <- assignedIncident
+		if assignedIncident.Id == 0 {
+			return
+		}
+
+		if nextOfficer := findNearestAvailableOfficer(assignedIncident); nextOfficer != nil {
+			nextOfficer.IncidentId = assignedIncident.Id
+			MapOfficerById.Set(nextOfficer.Id, *nextOfficer)
+
+			assignedIncident.OfficerId = nextOfficer.Id
+		} else {
+			assignedIncident.OfficerId = 0
+		}
+		MapIncidentById.Set(incidentId, assignedIncident)
+
 	}
 }
 
 func handleOfficerLocationUpdated(officer models.Officer) {
 	foundOfficer := MapOfficerById.Get(officer.Id)
+	if foundOfficer.Id == 0 {
+		return
+	}
 	foundOfficer.Loc = officer.Loc
 	MapOfficerById.Set(officer.Id, foundOfficer)
 	if foundOfficer.IncidentId == 0 {
-		if incident := findNearestIncident(foundOfficer); incident != nil {
+		if incident := findNearestUnassignedIncident(foundOfficer); incident != nil {
 			foundOfficer.IncidentId = incident.Id
-			foundOfficer.IsBusy = true
-			incident.OfficerId = foundOfficer.Id
-
 			MapOfficerById.Set(foundOfficer.Id, foundOfficer)
+
+			incident.OfficerId = foundOfficer.Id
 			MapIncidentById.Set(incident.Id, *incident)
 		}
 	}
@@ -169,15 +191,15 @@ func distance(first *models.Location, last *models.Location) float64 {
 	return math.Sqrt(float64(first.X-last.X)*float64(first.X-last.X) + float64(first.Y-last.Y)*float64(first.Y-last.Y))
 }
 
-func findNearestOfficer(incident models.Incident) *models.Officer {
+func findNearestAvailableOfficer(incident models.Incident) *models.Officer {
 	shortest := 10000000.0
 	var chosenOfficer *models.Officer
 	for _, officer := range MapOfficerById.Copy() {
-		if officer.Id == 0 || officer.IsBusy || (officer.Loc.X == 0 && officer.Loc.Y == 0) {
+		if officer.Id == 0 || officer.IncidentId != 0 || (officer.Loc.X == 0 && officer.Loc.Y == 0) {
 			continue
 		}
 		d := distance(&officer.Loc, &incident.Loc)
-		if shortest > 0 && d < shortest {
+		if d < shortest {
 			shortest = d
 			chosenOfficer = &officer
 		}
@@ -185,11 +207,11 @@ func findNearestOfficer(incident models.Incident) *models.Officer {
 	return chosenOfficer
 }
 
-func findNearestIncident(officer models.Officer) *models.Incident {
+func findNearestUnassignedIncident(officer models.Officer) *models.Incident {
 	shortest := 10000000.0
 	var pickedTask *models.Incident
 	for _, incident := range MapIncidentById.Copy() {
-		if incident.OfficerId != 0 {
+		if incident.Id == 0 || incident.OfficerId != 0 {
 			continue
 		}
 		d := distance(&officer.Loc, &incident.Loc)
